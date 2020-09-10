@@ -9,6 +9,7 @@
 #include "return_type.hpp"
 #include "find_captures.hpp"
 #include "first.hpp"
+#include "pattern_match_limits.hpp"
 
 // remove me when MSVC fix the constexpr bug
 #ifdef _MSC_VER
@@ -37,17 +38,47 @@ template <size_t Limit> constexpr CTRE_FORCE_INLINE bool less_than(size_t i) {
 	}
 }
 
+template<typename Iterator>
+constexpr CTRE_FORCE_INLINE bool is_variable_length_encoded(Iterator) {
+	//assume iterators over char32_t*'s are utf32 encoded (fixed length of 4 bytes)
+	if constexpr (std::is_same<std::iterator_traits<Iterator>::pointer, char32_t*>::value) {
+		return false;
+	} else {
+		return true;
+	}
+};
+
 // calling with pattern prepare stack and triplet of iterators
 template <typename Iterator, typename EndIterator, typename Pattern> 
 constexpr inline auto match_re(const Iterator begin, const EndIterator end, Pattern pattern) noexcept {
 	using return_type = decltype(regex_results(std::declval<Iterator>(), find_captures(pattern)));
-	return evaluate(begin, begin, end, return_type{}, ctll::list<start_mark, Pattern, assert_end, end_mark, accept>());
+	if constexpr (!ctre::is_variable_length_encoded<Iterator>(Iterator{}) && std::is_same<std::iterator_traits<Iterator>::iterator_category, std::random_access_iterator_tag>::value) {
+		constexpr auto lengths = ctre::pattern_limit_analysis(ctll::list<start_mark, Pattern, assert_end, end_mark, accept>(), return_type{});
+		//check the size of the input string
+		auto length = std::distance(begin, end);
+		if (length >= lengths.min && length <= lengths.max) //if not within bounds we can avoid this call
+			return evaluate(begin, begin, end, return_type{}, ctll::list<start_mark, Pattern, assert_end, end_mark, accept>());
+		else
+			return return_type{};
+	} else {
+		return evaluate(begin, begin, end, return_type{}, ctll::list<start_mark, Pattern, assert_end, end_mark, accept>());
+	}
 }
 
 template <typename Iterator, typename EndIterator, typename Pattern> 
 constexpr inline auto starts_with_re(const Iterator begin, const EndIterator end, Pattern pattern) noexcept {
-	using return_type = decltype(regex_results(std::declval<Iterator>(), find_captures(pattern)));
-	return evaluate(begin, begin, end, return_type{}, ctll::list<start_mark, Pattern, end_mark, accept>());
+	using return_type = decltype(regex_results(std::declval<Iterator>(begin), find_captures(pattern)));
+	if constexpr (!ctre::is_variable_length_encoded<Iterator>() && std::is_same<std::iterator_traits<Iterator>::iterator_category, std::random_access_iterator_tag>::value) {
+		constexpr auto lengths = ctre::pattern_limit_analysis(ctll::list<start_mark, Pattern, assert_end, end_mark, accept>(), return_type{});
+		//check the size of the input string
+		auto length = std::distance(begin, end);
+		if (length >= lengths.min) //we only check the minimum size requirement since starts with implicitly trails w/ (.*) meaning the max is infinite
+			return evaluate(begin, begin, end, return_type{}, ctll::list<start_mark, Pattern, end_mark, accept>());
+		else
+			return return_type{};
+	} else {
+		return evaluate(begin, begin, end, return_type{}, ctll::list<start_mark, Pattern, end_mark, accept>());
+	}
 }
 
 template <typename Iterator, typename EndIterator, typename Pattern> 
@@ -55,16 +86,33 @@ constexpr inline auto search_re(const Iterator begin, const EndIterator end, Pat
 	using return_type = decltype(regex_results(std::declval<Iterator>(), find_captures(pattern)));
 	
 	constexpr bool fixed = starts_with_anchor(ctll::list<Pattern>{});
-	
-	auto it = begin;
-	for (; end != it && !fixed; ++it) {
-		if (auto out = evaluate(begin, it, end, return_type{}, ctll::list<start_mark, Pattern, end_mark, accept>())) {
-			return out;
+	if constexpr (!ctre::is_variable_length_encoded<Iterator>(begin) && std::is_same<std::iterator_traits<Iterator>::iterator_category, std::random_access_iterator_tag>::value) {
+		constexpr auto lengths = ctre::pattern_limit_analysis(ctll::list<start_mark, Pattern, assert_end, end_mark, accept>(), return_type{});
+		//check the size of the input string
+		auto length = std::distance(begin, end);
+
+		auto it = begin;
+		for (; end != it && !fixed && length >= lengths.min; ++it) { //similar to starts_with, but we loop
+			if (auto out = evaluate(begin, it, end, return_type{}, ctll::list<start_mark, Pattern, end_mark, accept>())) {
+				return out;
+			}
+			length--;
 		}
+
+		// in case the RE is empty or fixed
+		return evaluate(begin, it, end, return_type{}, ctll::list<start_mark, Pattern, end_mark, accept>());
 	}
-	
-	// in case the RE is empty or fixed
-	return evaluate(begin, it, end, return_type{}, ctll::list<start_mark, Pattern, end_mark, accept>());
+	else {
+		auto it = begin;
+		for (; end != it && !fixed; ++it) {
+			if (auto out = evaluate(begin, it, end, return_type{}, ctll::list<start_mark, Pattern, end_mark, accept>())) {
+				return out;
+			}
+		}
+
+		// in case the RE is empty or fixed
+		return evaluate(begin, it, end, return_type{}, ctll::list<start_mark, Pattern, end_mark, accept>());
+	}
 }
 
 
