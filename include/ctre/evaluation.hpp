@@ -470,6 +470,23 @@ constexpr CTRE_FORCE_INLINE R evaluate(const Iterator begin, Iterator current, c
 	}
 }
 
+// mimic alternation (greedy) repeat of alternation (?:a|b|...)* -> a*(?:b|...|+a*)* or (?:a|b...){n,} -> (?:a|b|...){n,n}a*(?:b|...|+a*)*
+template <typename R, typename Iterator, typename EndIterator, typename A, size_t N, typename... Content, typename... Tail>
+constexpr CTRE_FORCE_INLINE R evaluate(const Iterator begin, Iterator current, const EndIterator end, R captures, ctll::list<repeat<N, 0, sequence<select<A, Content...>>>, Tail...>) noexcept {
+	if constexpr (N == 0)
+		return evaluate(begin, current, end, captures, ctll::list<star<A>, star<plus<select<Content...>>, star<A>>, Tail...>());
+	else
+		return evaluate(begin, current, end, captures, ctll::list<repeat<N, N, select<A, Content...>>, star<A>, star<plus<select<Content...>>, star<A>>, Tail...>());
+}
+
+template <typename R, typename Iterator, typename EndIterator, typename A, size_t N, typename... Content, typename... Tail>
+constexpr CTRE_FORCE_INLINE R evaluate(const Iterator begin, Iterator current, const EndIterator end, R captures, ctll::list<repeat<N, 0, select<A, Content...>>, Tail...>) noexcept {
+	if constexpr (N == 0)
+		return evaluate(begin, current, end, captures, ctll::list<star<A>, star<plus<select<Content...>>, star<A>>, Tail...>());
+	else
+		return evaluate(begin, current, end, captures, ctll::list<repeat<N, N, select<A, Content...>>, star<A>, star<plus<select<Content...>>, star<A>>, Tail...>());
+}
+
 // property matching
 
 
