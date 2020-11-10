@@ -153,7 +153,8 @@ namespace ctre {
 	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(ctll::list<Patterns...>, R captures) noexcept {
 		return ((regex_count(Patterns{}, captures)) + ...);
 	}
-	template<typename R, typename... Patterns>
+
+	template<typename... Patterns>
 	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(ctll::list<Patterns...>) noexcept {
 		return ((regex_count(Patterns{})) + ...);
 	}
@@ -162,7 +163,8 @@ namespace ctre {
 	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(sequence<Patterns...>, R captures) noexcept {
 		return regex_count(ctll::list<Patterns...>(), captures);
 	}
-	template<typename R, typename... Patterns>
+
+	template<typename... Patterns>
 	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(sequence<Patterns...>) noexcept {
 		return regex_count(ctll::list<Patterns...>());
 	}
@@ -187,6 +189,7 @@ namespace ctre {
 		return regex_count(ctll::list<Patterns...>());
 	}
 
+	//needs context of captures
 	template<size_t Index, typename R>
 	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(back_reference<Index>, R captures) noexcept {
 		const auto ref = captures.template get<Index>();
@@ -212,14 +215,29 @@ namespace ctre {
 		return regex_count_result{ sizeof...(Str), sizeof...(Str) };
 	}
 
+	template<auto... Str>
+	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(string<Str...>) noexcept {
+		return regex_count_result{ sizeof...(Str), sizeof...(Str) };
+	}
+
 	template<typename R, typename CharacterLike, typename = std::enable_if_t<MatchesCharacter<CharacterLike>::template value<decltype(*std::declval<std::string_view::iterator>())>, void>>
 	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(CharacterLike, R captures) noexcept {
+		return regex_count_result{ 1ULL, 1ULL };
+	}
+
+	template<typename CharacterLike, typename = std::enable_if_t<MatchesCharacter<CharacterLike>::template value<decltype(*std::declval<std::string_view::iterator>())>, void>>
+	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(CharacterLike) noexcept {
 		return regex_count_result{ 1ULL, 1ULL };
 	}
 
 	template<typename R, typename... Patterns>
 	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(select<Patterns...>, R captures) noexcept {
 		return ((regex_count(Patterns{}, captures)) || ...);
+	}
+
+	template<typename R, typename... Patterns>
+	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(select<Patterns...>) noexcept {
+		return ((regex_count(Patterns{})) || ...);
 	}
 
 	template<size_t A, size_t B, typename R, typename... Content>
@@ -233,9 +251,25 @@ namespace ctre {
 		return ret;
 	}
 
+	template<size_t A, size_t B, typename... Content>
+	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(repeat<A, B, Content...>) noexcept {
+		regex_count_result ret{ 0ULL, 0ULL };
+		if constexpr (sizeof...(Content)) {
+			constexpr size_t MinA = A;
+			constexpr size_t MaxA = (B) ? (B) : (size_t{ 0 } - 1); // 0 in the second part means inf
+			ret = regex_count(ctll::list<Content...>()) * regex_count_result { MinA, MaxA };
+		}
+		return ret;
+	}
+
 	template<size_t A, size_t B, typename R, typename... Content>
 	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(lazy_repeat<A, B, Content...>, R captures) noexcept {
 		return regex_count(repeat<A, B, Content...>(), captures);
+	}
+
+	template<size_t A, size_t B, typename... Content>
+	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(lazy_repeat<A, B, Content...>) noexcept {
+		return regex_count(repeat<A, B, Content...>());
 	}
 
 	template<size_t A, size_t B, typename R, typename... Content>
@@ -243,7 +277,12 @@ namespace ctre {
 		return regex_count(repeat<A, B, Content...>(), captures);
 	}
 
-	//
+	template<size_t A, size_t B, typename... Content>
+	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(possessive_repeat<A, B, Content...>) noexcept {
+		return regex_count(repeat<A, B, Content...>());
+	}
+	
+	//sink for any atom that shouldn't impact the result
 	template<typename Pattern, typename R>
 	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(Pattern, R) noexcept {
 		return regex_count_result{0ULL, 0ULL};
