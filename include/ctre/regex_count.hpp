@@ -179,6 +179,16 @@ namespace ctre {
 		return regex_count(ctll::list<Patterns...>());
 	}
 
+	template<typename R, typename... Patterns>
+	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(atomic_group<Patterns...>, R captures) noexcept {
+		return regex_count(ctll::list<Patterns...>(), captures);
+	}
+
+	template<typename... Patterns>
+	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(atomic_group<Patterns...>) noexcept {
+		return regex_count(ctll::list<Patterns...>());
+	}
+
 	template<size_t Index, typename Name, typename R, typename... Patterns>
 	static constexpr CTRE_FORCE_INLINE regex_count_result regex_count(capture_with_name<Index, Name, Patterns...>, R captures) noexcept {
 		return regex_count(ctll::list<Patterns...>(), captures);
