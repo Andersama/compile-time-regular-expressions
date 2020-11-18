@@ -66,7 +66,7 @@ struct search_method {
 		constexpr bool fixed = starts_with_anchor(Modifier{}, ctll::list<RE>{});
 	
 		auto it = begin;
-		if constexpr (is_string(front_re{}.front) && size(front_re{}.list)) {
+		if constexpr (false && is_string(front_re{}.front) && size(front_re{}.list)) {
 			auto it2 = search_for_string(it, end, front_re{}.front);
 			return_type<result_iterator, RE> result{};
 			for (; end != it2.position;) {
@@ -81,7 +81,7 @@ struct search_method {
 			}
 			result.set_start_mark(it2.position);
 			return result = evaluate(orig_begin, it2.end_position, end, Modifier{}, result, ctll::list<start_mark, decltype(make_into_sequence(front_re{}.list)), end_mark, accept>());
-		} else if constexpr (is_string(front_re{}.front)) {
+		} else if constexpr (false && is_string(front_re{}.front)) {
 			auto it2 = search_for_string(it, end, front_re{}.front);
 			return_type<result_iterator, RE> result{};
 			result.set_start_mark(it2.position);
