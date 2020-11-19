@@ -711,6 +711,46 @@ constexpr uint32_t CTRE_FORCE_INLINE reverse_bits(uint32_t v) noexcept {
 	return v;
 }
 
+template<typename Ty, size_t N, size_t M>
+constexpr std::array<__m128i, M> make_sse_table_vertical(const dfa_table<Ty,N,M> &dfa) {
+	std::array<__m128i, M> transitions{};
+	if (!std::is_constant_evaluated()) {
+		//setup sheng transition table
+		for (size_t j = 0; j < transitions.size(); j++) {
+			transitions[j] = _mm_set1_epi8(0);
+		}
+		for (size_t j = 0; j < transitions.size(); j++) {
+			for (size_t c = 0; c < 16; c++) {
+				transitions[c].m128i_u8[j] = dfa.table[j][c];
+			}
+		}
+	} else {
+		for (size_t j = 0; j < 16; j++) {
+			for (size_t c = 0; c < M; c++) {
+				transitions[c].m128i_u8[j] = 0;
+			}
+		}
+		for (size_t j = 0; j < N; j++) {
+			for (size_t c = 0; c < M; c++) {
+				transitions[c].m128i_u8[j] = dfa.table[j][c];
+			}
+		}
+	}
+	return transitions;
+}
+
+constexpr std::array<__m128i, 16> make_sse_ec_table_vertical(const ::std::array<uint8_t,256> &ec) {
+	std::array<__m128i, 16> classes{};
+	size_t idx = 0;
+	for (size_t i = 0; i < 16; i++) {
+		for (size_t j = 0; j < 16; j++) {
+			classes[i].m128i_u8[j] = ec[idx];
+			idx++;
+		}
+	}
+	return classes;
+}
+
 template <typename Iterator, typename EndIterator, auto... String>
 constexpr CTRE_FORCE_INLINE string_search_result<Iterator> search_for_string(Iterator current, const EndIterator end, string<String...>) noexcept {
 #if __cpp_char8_t >= 201811
@@ -721,7 +761,6 @@ constexpr CTRE_FORCE_INLINE string_search_result<Iterator> search_for_string(Ite
 #endif
 		constexpr auto dfa_info = make_string_search_dfa<Iterator>(string<String...>());
 		constexpr std::array<typename ::std::iterator_traits<Iterator>::value_type, sizeof...(String)> chars{ String... };
-		//size_t str_size = std::distance(current, end);
 		size_t state = 0;
 		size_t i = 0;
 		string_search_result<Iterator> result{};
@@ -731,17 +770,331 @@ constexpr CTRE_FORCE_INLINE string_search_result<Iterator> search_for_string(Ite
 			if constexpr (dfa_info.first.inputs() <= 16) {
 				const __m128i state_mask = _mm_set1_epi8(sizeof...(String)-1);
 				__m128i states = _mm_set1_epi8(0);
-				__m128i shift_states = _mm_set1_epi8(0);
+				//__m128i shift_states = _mm_set1_epi8(0);
+				static constexpr auto transitions = make_sse_table_vertical(dfa_info.first);
+				static constexpr auto ec_classes = make_sse_ec_table_vertical(dfa_info.second);
+				/*
 				__m128i transitions[dfa_info.first.states()];
+				//setup sheng transition table
 				for (size_t j = 0; j < dfa_info.first.states(); j++) {
 					transitions[j] = _mm_set1_epi8(0);
+				}
+				for (size_t j = 0; j < dfa_info.first.states(); j++) {
 					for (size_t c = 0; c < dfa_info.first.inputs(); c++) {
 						transitions[j].m128i_u8[c] = dfa_info.first.table[j][c];
 					}
 				}
+				*/
+				/*
+				for (; (i+7) < string_left;) {
+					uint8_t c1 = *(current + i);
+					uint8_t c2 = *(current + i + 1);
+					uint8_t c3 = *(current + i + 2);
+					uint8_t c4 = *(current + i + 3);
+					uint8_t c5 = *(current + i + 4);
+					uint8_t c6 = *(current + i + 5);
+					uint8_t c7 = *(current + i + 6);
+					uint8_t c8 = *(current + i + 7);
+
+					uint8_t e1 = dfa_info.second[c1];
+					uint8_t e2 = dfa_info.second[c2];
+					uint8_t e3 = dfa_info.second[c3];
+					uint8_t e4 = dfa_info.second[c4];
+					uint8_t e5 = dfa_info.second[c5];
+					uint8_t e6 = dfa_info.second[c6];
+					uint8_t e7 = dfa_info.second[c7];
+					uint8_t e8 = dfa_info.second[c8];
+
+					states = _mm_shuffle_epi8(transitions[e1], states);
+					uint8_t state1 = _mm_cvtsi128_si32(states);
+
+					states = _mm_shuffle_epi8(transitions[e2], states);
+					uint8_t state2 = _mm_cvtsi128_si32(states);
+
+					states = _mm_shuffle_epi8(transitions[e3], states);
+					uint8_t state3 = _mm_cvtsi128_si32(states);
+
+					states = _mm_shuffle_epi8(transitions[e4], states);
+					uint8_t state4 = _mm_cvtsi128_si32(states);
+
+					states = _mm_shuffle_epi8(transitions[e5], states);
+					uint8_t state5 = _mm_cvtsi128_si32(states);
+
+					states = _mm_shuffle_epi8(transitions[e6], states);
+					uint8_t state6 = _mm_cvtsi128_si32(states);
+
+					states = _mm_shuffle_epi8(transitions[e7], states);
+					uint8_t state7 = _mm_cvtsi128_si32(states);
+
+					states = _mm_shuffle_epi8(transitions[e8], states);
+					uint8_t state8 = _mm_cvtsi128_si32(states);
+
+					if (state1 >= sizeof...(String) ||
+						state2 >= sizeof...(String) ||
+						state3 >= sizeof...(String) ||
+						state4 >= sizeof...(String) ||
+						state5 >= sizeof...(String) ||
+						state6 >= sizeof...(String) ||
+						state7 >= sizeof...(String) ||
+						state8 >= sizeof...(String)
+						) [[unlikely]] {
+						if (state1 >= sizeof...(String))
+							return result = { current + (i + 1 - sizeof...(String)), current + (i + 1), true };
+						if (state2 >= sizeof...(String))
+							return result = { current + (i + 2 - sizeof...(String)), current + (i + 2), true };
+						if (state3 >= sizeof...(String))
+							return result = { current + (i + 3 - sizeof...(String)), current + (i + 3), true };
+						if (state4 >= sizeof...(String))
+							return result = { current + (i + 4 - sizeof...(String)), current + (i + 4), true };
+						if (state5 >= sizeof...(String))
+							return result = { current + (i + 5 - sizeof...(String)), current + (i + 5), true };
+						if (state6 >= sizeof...(String))
+							return result = { current + (i + 6 - sizeof...(String)), current + (i + 6), true };
+						if (state7 >= sizeof...(String))
+							return result = { current + (i + 7 - sizeof...(String)), current + (i + 7), true };
+
+						//if (state4)
+						return result = { current + (i + 8 - sizeof...(String)), current + (i + 8), true };
+					}
+					i += 8;
+				}
+				*/
+				/*
+				for (; (i + 7) < string_left; i+=8) {
+					__m128i e_all = _mm_set1_epi8(0);
+					uint8_t c1 = *(current + i);
+					uint8_t c2 = *(current + i + 1);
+					uint8_t c3 = *(current + i + 2);
+					uint8_t c4 = *(current + i + 3);
+					uint8_t c5 = *(current + i + 4);
+					uint8_t c6 = *(current + i + 5);
+					uint8_t c7 = *(current + i + 6);
+					uint8_t c8 = *(current + i + 7);
+
+					uint8_t hi1 = c1 >> 4;
+					uint8_t lo1 = c1 & 0x0f;
+					__m128i e1_m = _mm_shuffle_epi8(ec_classes[hi1], _mm_set1_epi8(lo1));
+					uint8_t e1 = _mm_cvtsi128_si32(e1_m);
+					e_all.m128i_u8[0] = e1;
+
+					uint8_t hi2 = c2 >> 4;
+					uint8_t lo2 = c2 & 0x0f;
+					__m128i e2_m = _mm_shuffle_epi8(ec_classes[hi2], _mm_set1_epi8(lo2));
+					uint8_t e2 = _mm_cvtsi128_si32(e2_m);
+					e_all.m128i_u8[0] = e1;
+
+					uint8_t hi3 = c3 >> 4;
+					uint8_t lo3 = c3 & 0x0f;
+					__m128i e3_m = _mm_shuffle_epi8(ec_classes[hi3], _mm_set1_epi8(lo3));
+					uint8_t e3 = _mm_cvtsi128_si32(e3_m);
+					e_all.m128i_u8[0] = e1;
+
+					uint8_t hi4 = c4 >> 4;
+					uint8_t lo4 = c4 & 0x0f;
+					__m128i e4_m = _mm_shuffle_epi8(ec_classes[hi4], _mm_set1_epi8(lo4));
+					uint8_t e4 = _mm_cvtsi128_si32(e4_m);
+					e_all.m128i_u8[0] = e;
+
+					uint8_t hi5 = c5 >> 4;
+					uint8_t lo5 = c5 & 0x0f;
+					__m128i e5_m = _mm_shuffle_epi8(ec_classes[hi5], _mm_set1_epi8(lo5));
+					uint8_t e5 = _mm_cvtsi128_si32(e5_m);
+					e_all.m128i_u8[0] = e5;
+
+					uint8_t hi6 = c6 >> 4;
+					uint8_t lo6 = c6 & 0x0f;
+					__m128i e6_m = _mm_shuffle_epi8(ec_classes[hi6], _mm_set1_epi8(lo6));
+					uint8_t e6 = _mm_cvtsi128_si32(e6_m);
+					e_all.m128i_u8[0] = e6;
+
+					uint8_t hi7 = c7 >> 4;
+					uint8_t lo7 = c7 & 0x0f;
+					__m128i e7_m = _mm_shuffle_epi8(ec_classes[hi7], _mm_set1_epi8(lo7));
+					uint8_t e7 = _mm_cvtsi128_si32(e7_m);
+					e_all.m128i_u8[6] = e7;
+
+					uint8_t hi8 = c8 >> 4;
+					uint8_t lo8 = c8 & 0x0f;
+					__m128i e8_m = _mm_shuffle_epi8(ec_classes[hi8], _mm_set1_epi8(lo8));
+					uint8_t e8 = _mm_cvtsi128_si32(e8_m);
+					e_all.m128i_u8[7] = e8;
+
+					uint8_t tmp1 = states.m128i_u8[0];
+					states = _mm_bsrli_si128(states, 1);
+					states = _mm_shuffle_epi8(transitions[e1], states);
+					states.m128i_u8[1] = tmp1;
+
+					uint8_t tmp2 = states.m128i_u8[0];
+					states = _mm_bsrli_si128(states, 1);
+					states = _mm_shuffle_epi8(transitions[e2], states);
+					states.m128i_u8[1] = tmp2;
+
+					uint8_t tmp3 = states.m128i_u8[0];
+					states = _mm_bsrli_si128(states, 1);
+					states = _mm_shuffle_epi8(transitions[e3], states);
+					states.m128i_u8[1] = tmp3;
+
+					uint8_t tmp4 = states.m128i_u8[0];
+					states = _mm_bsrli_si128(states, 1);
+					states = _mm_shuffle_epi8(transitions[e4], states);
+					states.m128i_u8[1] = tmp4;
+
+					uint8_t tmp5 = states.m128i_u8[0];
+					states = _mm_bsrli_si128(states, 1);
+					states = _mm_shuffle_epi8(transitions[e5], states);
+					states.m128i_u8[1] = tmp5;
+
+					uint8_t tmp6 = states.m128i_u8[0];
+					states = _mm_bsrli_si128(states, 1);
+					states = _mm_shuffle_epi8(transitions[e6], states);
+					states.m128i_u8[1] = tmp6;
+
+					uint8_t tmp7 = states.m128i_u8[0];
+					states = _mm_bsrli_si128(states, 1);
+					states = _mm_shuffle_epi8(transitions[e7], states);
+					states.m128i_u8[1] = tmp7;
+
+					uint8_t tmp8 = states.m128i_u8[0];
+					states = _mm_bsrli_si128(states, 1);
+					states = _mm_shuffle_epi8(transitions[e8], states);
+					states.m128i_u8[1] = tmp8;
+
+					__m128i cmask = _mm_cmpgt_epi8(str_states, cmp_mask);
+					__m128i lmask = _mm_cmpgt_epi8(str_states, tmask);
+
+					if () [[unlikely]] {
+						
+					}
+				}
+				*/
+				//for (;i < string_left && *(current + i) != ; i++)
+				for (; i < string_left; i+=8) {
+					/*
+					__m128i c_a = load_unaligned_m128i((const int8_t*)&(*(current+i)));
+					//uint8_t c1 = *(current + i);
+					uint8_t e1 = *(((const uint8_t*)&ec_classes[0]) + c_a.m128i_u8[0]);
+					states = _mm_shuffle_epi8(transitions[e1], states);
+					uint8_t state1 = _mm_cvtsi128_si32(states);
+
+					//uint8_t c2 = *(current + i + 1);
+					uint8_t e2 = *(((const uint8_t*)&ec_classes[0]) + c_a.m128i_u8[1]);
+					states = _mm_shuffle_epi8(transitions[e2], states);
+					uint8_t state2 = _mm_cvtsi128_si32(states);
+
+					//uint8_t c3 = *(current + i + 2);
+					uint8_t e3 = *(((const uint8_t*)&ec_classes[0]) + c_a.m128i_u8[2]);
+					states = _mm_shuffle_epi8(transitions[e3], states);
+					uint8_t state3 = _mm_cvtsi128_si32(states);
+
+					//uint8_t c4 = *(current + i + 3);
+					uint8_t e4 = *(((const uint8_t*)&ec_classes[0]) + c_a.m128i_u8[3]);
+					states = _mm_shuffle_epi8(transitions[e4], states);
+					uint8_t state4 = _mm_cvtsi128_si32(states);
+
+					//uint8_t c5 = *(current + i + 4);
+					uint8_t e5 = *(((const uint8_t*)&ec_classes[0]) + c_a.m128i_u8[4]);
+					states = _mm_shuffle_epi8(transitions[e5], states);
+					uint8_t state5 = _mm_cvtsi128_si32(states);
+
+					//uint8_t c6 = *(current + i + 5);
+					uint8_t e6 = *(((const uint8_t*)&ec_classes[0]) + c_a.m128i_u8[5]);
+					states = _mm_shuffle_epi8(transitions[e6], states);
+					uint8_t state6 = _mm_cvtsi128_si32(states);
+
+					//uint8_t c7 = *(current + i + 6);
+					uint8_t e7 = *(((const uint8_t*)&ec_classes[0]) + c_a.m128i_u8[6]);
+					states = _mm_shuffle_epi8(transitions[e7], states);
+					uint8_t state7 = _mm_cvtsi128_si32(states);
+
+					//uint8_t c8 = *(current + i + 7);
+					uint8_t e8 = *(((const uint8_t*)&ec_classes[0]) + c_a.m128i_u8[7]);
+					states = _mm_shuffle_epi8(transitions[e8], states);
+					uint8_t state8 = _mm_cvtsi128_si32(states);
+					*/
+					
+					uint8_t c1 = *(current + i);
+					uint8_t e1 = *(((const uint8_t*)&ec_classes[0]) + c1);
+					states = _mm_shuffle_epi8(transitions[e1], states);
+					uint8_t state1 = _mm_cvtsi128_si32(states);
+
+					uint8_t c2 = *(current + i + 1);
+					uint8_t e2 = *(((const uint8_t*)&ec_classes[0]) + c2);
+					states = _mm_shuffle_epi8(transitions[e2], states);
+					uint8_t state2 = _mm_cvtsi128_si32(states);
+
+					uint8_t c3 = *(current + i + 2);
+					uint8_t e3 = *(((const uint8_t*)&ec_classes[0]) + c3);
+					states = _mm_shuffle_epi8(transitions[e3], states);
+					uint8_t state3 = _mm_cvtsi128_si32(states);
+
+					uint8_t c4 = *(current + i + 3);
+					uint8_t e4 = *(((const uint8_t*)&ec_classes[0]) + c4);
+					states = _mm_shuffle_epi8(transitions[e4], states);
+					uint8_t state4 = _mm_cvtsi128_si32(states);
+
+					uint8_t c5 = *(current + i + 4);
+					uint8_t e5 = *(((const uint8_t*)&ec_classes[0]) + c5);
+					states = _mm_shuffle_epi8(transitions[e5], states);
+					uint8_t state5 = _mm_cvtsi128_si32(states);
+
+					uint8_t c6 = *(current + i + 5);
+					uint8_t e6 = *(((const uint8_t*)&ec_classes[0]) + c6);
+					states = _mm_shuffle_epi8(transitions[e6], states);
+					uint8_t state6 = _mm_cvtsi128_si32(states);
+
+					uint8_t c7 = *(current + i + 6);
+					uint8_t e7 = *(((const uint8_t*)&ec_classes[0]) + c7);
+					states = _mm_shuffle_epi8(transitions[e7], states);
+					uint8_t state7 = _mm_cvtsi128_si32(states);
+
+					uint8_t c8 = *(current + i + 7);
+					uint8_t e8 = *(((const uint8_t*)&ec_classes[0]) + c8);
+					states = _mm_shuffle_epi8(transitions[e8], states);
+					uint8_t state8 = _mm_cvtsi128_si32(states);
+					
+					if (state1 >= sizeof...(String) ||
+						state2 >= sizeof...(String) ||
+						state3 >= sizeof...(String) ||
+						state4 >= sizeof...(String) ||
+						state5 >= sizeof...(String) ||
+						state6 >= sizeof...(String) ||
+						state7 >= sizeof...(String) ||
+						state8 >= sizeof...(String)
+						) [[unlikely]] {
+						if (state1 >= sizeof...(String))
+							return result = { current + (i + 1 - sizeof...(String)), current + (i + 1), true };
+						if (state2 >= sizeof...(String))
+							return result = { current + (i + 2 - sizeof...(String)), current + (i + 2), true };
+						if (state3 >= sizeof...(String))
+							return result = { current + (i + 3 - sizeof...(String)), current + (i + 3), true };
+						if (state4 >= sizeof...(String))
+							return result = { current + (i + 4 - sizeof...(String)), current + (i + 4), true };
+						if (state5 >= sizeof...(String))
+							return result = { current + (i + 5 - sizeof...(String)), current + (i + 5), true };
+						if (state6 >= sizeof...(String))
+							return result = { current + (i + 6 - sizeof...(String)), current + (i + 6), true };
+						if (state7 >= sizeof...(String))
+							return result = { current + (i + 7 - sizeof...(String)), current + (i + 7), true };
+
+						//if (state4)
+						return result = { current + (i + 8 - sizeof...(String)), current + (i + 8), true };
+					}
+				}
 				for (; i < string_left; i++) {
 					uint8_t c1 = *(current + i);
-					uint8_t e1 = dfa_info.second[c1];
+					uint8_t e1 = *(((const uint8_t*)&ec_classes[0]) + c1);
+					//uint8_t hi = c1 >> 4;
+					//uint8_t lo = c1 & 0x0f;
+					//__m128i e1_m = _mm_shuffle_epi8(ec_classes[hi], _mm_set1_epi8(lo));
+					//uint8_t e1 = _mm_cvtsi128_si32(e1_m);
+					//uint8_t e1 = dfa_info.second[c1];
+					states = _mm_shuffle_epi8(transitions[e1], states);
+					uint8_t state = _mm_cvtsi128_si32(states);
+					//std::cout << (int)state << '\n';
+					if (state >= sizeof...(String)) [[unlikely]] {
+						return result = { current + (i + 1 - sizeof...(String)), current + (i + 1), true };
+					}
+					/*
 					uint8_t tmp = states.m128i_u8[0];
 					states = _mm_bsrli_si128(states, 1);
 					states = _mm_shuffle_epi8(transitions[e1], states);
@@ -749,6 +1102,7 @@ constexpr CTRE_FORCE_INLINE string_search_result<Iterator> search_for_string(Ite
 					if (states.m128i_u8[i] >= sizeof...(String)) {
 						return result = { current + (i + 1 - sizeof...(String)), current + (i + 1), true };
 					}
+					*/
 				}
 				return result = { current + string_left, current + string_left, false };
 			} else if (dfa_info.first.states() <= 16) {
@@ -782,165 +1136,6 @@ constexpr CTRE_FORCE_INLINE string_search_result<Iterator> search_for_string(Ite
 				}
 				return result = { current + string_left, current + string_left, false };
 			}
-#if 0
-			const __m128i cmp_mask = _mm_set1_epi8(sizeof...(String) - 1);
-			__m128i cmp_mask2{};
-			__m128i str_states{};
-			__m128i str_chrs{};
-			__m128i str_ecs{};
-			for (size_t j = 0; j < 16; j++)
-				cmp_mask2.m128i_u8[j] = j;
-			for (size_t j = 0; j < 16; j++)
-				str_states.m128i_u8[j] = j;
-
-			//_mm_srli_si128(_16,1)
-			for (; (i + 15) < string_left;) {
-				str_chrs = load_unaligned_m128i((const int8_t*)&(*(current + i)));
-				__m128i tmask = _mm_add_epi8(_mm_set1_epi8(state), cmp_mask2);
-#if 0
-				str_ecs = _mm_set_epi8(
-					dfa_info.second[str_chrs.m128i_u8[0]],
-					dfa_info.second[str_chrs.m128i_u8[1]],
-					dfa_info.second[str_chrs.m128i_u8[2]],
-					dfa_info.second[str_chrs.m128i_u8[3]],
-					dfa_info.second[str_chrs.m128i_u8[4]],
-					dfa_info.second[str_chrs.m128i_u8[5]],
-					dfa_info.second[str_chrs.m128i_u8[6]],
-					dfa_info.second[str_chrs.m128i_u8[7]],
-					dfa_info.second[str_chrs.m128i_u8[8]],
-					dfa_info.second[str_chrs.m128i_u8[9]],
-					dfa_info.second[str_chrs.m128i_u8[10]],
-					dfa_info.second[str_chrs.m128i_u8[11]],
-					dfa_info.second[str_chrs.m128i_u8[12]],
-					dfa_info.second[str_chrs.m128i_u8[13]],
-					dfa_info.second[str_chrs.m128i_u8[14]],
-					dfa_info.second[str_chrs.m128i_u8[15]]
-				);
-				str_states = _mm_set_epi8(
-					dfa_info.first.table[str_states.m128i_u8[0]][str_ecs.m128i_u8[0]],
-					dfa_info.first.table[str_states.m128i_u8[1]][str_ecs.m128i_u8[1]],
-					dfa_info.first.table[str_states.m128i_u8[2]][str_ecs.m128i_u8[2]],
-					dfa_info.first.table[str_states.m128i_u8[3]][str_ecs.m128i_u8[3]],
-					dfa_info.first.table[str_states.m128i_u8[4]][str_ecs.m128i_u8[4]],
-					dfa_info.first.table[str_states.m128i_u8[5]][str_ecs.m128i_u8[5]],
-					dfa_info.first.table[str_states.m128i_u8[6]][str_ecs.m128i_u8[6]],
-					dfa_info.first.table[str_states.m128i_u8[7]][str_ecs.m128i_u8[7]],
-					dfa_info.first.table[str_states.m128i_u8[8]][str_ecs.m128i_u8[8]],
-					dfa_info.first.table[str_states.m128i_u8[9]][str_ecs.m128i_u8[9]],
-					dfa_info.first.table[str_states.m128i_u8[10]][str_ecs.m128i_u8[10]],
-					dfa_info.first.table[str_states.m128i_u8[11]][str_ecs.m128i_u8[11]],
-					dfa_info.first.table[str_states.m128i_u8[12]][str_ecs.m128i_u8[12]],
-					dfa_info.first.table[str_states.m128i_u8[13]][str_ecs.m128i_u8[13]],
-					dfa_info.first.table[str_states.m128i_u8[14]][str_ecs.m128i_u8[14]],
-					dfa_info.first.table[str_states.m128i_u8[15]][str_ecs.m128i_u8[15]]
-				);
-
-#endif
-				for (size_t j = 0; j < 16; j++) {
-					str_ecs.m128i_u8[j] = dfa_info.second[str_chrs.m128i_u8[j]];
-					str_states.m128i_u8[j] = dfa_info.first.table[str_states.m128i_u8[j]][str_ecs.m128i_u8[j]];
-				}
-#if 0
-				for (size_t j = 0; j < 16; j++) {
-					str_ecs.m128i_u8[j] = dfa_info.second[str_chrs.m128i_u8[j]];
-					/*
-					uint8_t hi = str_chrs.m128i_u8[i] >> 4;
-					uint8_t lo = str_chrs.m128i_u8[i] & 0xf;
-					str_ecs = _mm_insert_epi8(str_ecs, j, _mm_extract_epi8(ecs_table[hi], lo));
-					*/
-					//str_states = _mm_insert_epi8(str_states, j, _mm_extract_epi8(ecs_table[hi], lo));
-					//str_states.m256i_u8[j] = ecs_table[hi][lo];
-					//str_states.m128i_u8[j] = _mm_extract_epi8(ecs_table[hi], lo);
-				}
-				for (size_t j = 0; j < 16; j++) {
-					str_states.m128i_u8[j] = dfa_info.table[str_states.m128i_u8[j]][str_ecs[j]];
-				}
-#endif
-				__m128i cmask = _mm_cmpgt_epi8(str_states, cmp_mask);
-				__m128i lmask = _mm_cmpgt_epi8(str_states, tmask);
-				uint32_t mask0 = _mm_movemask_epi8(cmask);
-				uint32_t mask1 = ~_mm_movemask_epi8(lmask);
-
-				uint16_t flipped0 = reverse_bits(mask0) >> 16;
-				uint32_t l0s0 = countl_zeros(flipped0);
-				uint16_t flipped1 = reverse_bits(mask1) >> 16;
-				uint32_t l0s1 = countl_zeros(flipped1);
-				if (mask0 && ((l0s0+1) == l0s1)) [[unlikely]] {
-					return { current + (i + l0s0 + 1 - sizeof...(String)), current + (i + l0s0 + 1), true };
-				} else {
-					state = l0s1 < 16 ? str_states.m128i_u8[l0s1] : state + 16;
-					str_states = _mm_add_epi8(_mm_set1_epi8(state), cmp_mask2);
-					i += l0s1+1;
-					continue;
-				}	
-			}
-
-			/*
-			::std::array<uint8_t, 32> vals;
-
-			__m256i str_chrs;
-			__m256i str_ecs;
-			__m256i str_states;
-			//__m256i cmp_mask = _mm_set1_epi8(sizeof...(String) - 1);
-			const __m256i cmp_mask = _mm256_set1_epi8(sizeof...(String) - 1);
-			const __m256i eq_table = load_unaligned_m256i((const int8_t*)&dfa_info.second);
-			
-			//::std::array<uint8_t, 16> ecs;
-			for (; (i + 31) < string_left;) {
-				//str_chrs = load_unaligned(static_cast<typename ::std::iterator_traits<Iterator>::pointer>(current+i));
-				str_chrs = load_unaligned_m256i((const int8_t*)&(*(current + i)));
-				for (size_t j = 0; j < 32; j++) {
-					uint8_t eq = dfa_info.second[str_chrs.m256i_u8[j]];
-					state = str_states.m256i_u8[j] = dfa_info.first.table[state][eq];
-				}
-				__m256i cmask = _mm256_cmpgt_epi8(str_states, cmp_mask);
-				uint32_t mask = _mm256_movemask_epi8(cmask);
-				if (mask) [[unlikely]] {
-					uint32_t flipped = reverse_bits(mask);
-					uint32_t l0s = countl_zeros(flipped);
-					return { current + (i + l0s + 1 - sizeof...(String)), current + (i + l0s + 1), true };
-				} else {
-					i += 32;
-					continue;
-				}
-			}
-			*/
-			/*
-			__m128i str_chrs;
-			__m128i eq_cls;
-			__m128i str_states;
-			constexpr __m256i eq_tbl = load_unaligned_m128i((const int8_t*)&dfa_info.second);
-			const __m128i cmp_mask = _mm_set1_epi8(sizeof...(String) - 1);
-			
-			//::std::array<uint8_t, 16> ecs;
-			for (; (i + 15) < string_left;) {
-				//str_chrs = load_unaligned(static_cast<typename ::std::iterator_traits<Iterator>::pointer>(current+i));
-				str_chrs = load_unaligned_m128i((const int8_t*)&(*(current + i)));
-				__m128i eqc = _mm256_permutexvar_epi8(str_chrs, eq_tbl);
-
-				for (size_t j = 0; j < 16; j++)
-					eq_cls.m128i_u8[j] = dfa_info.second[str_chrs.m128i_u8[j]];
-				for (size_t j = 0; j < 16; j++)
-					str_states.m128i_u8[j] = state = dfa_info.first.table[state][eq_cls.m128i_u8[j]];
-
-				for (size_t j = 0; j < 16; j++) {
-					uint8_t eq = dfa_info.second[str_chrs.m128i_u8[j]];
-					state = str_states.m128i_u8[j] = dfa_info.first.table[state][eq];
-				}
-
-				__m128i cmask = _mm_cmpgt_epi8(str_states, cmp_mask);
-				uint32_t mask = _mm_movemask_epi8(cmask);
-				if (mask) [[unlikely]] {
-					uint16_t flipped = reverse_bits(mask) >> 16;
-					uint32_t l0s = countl_zeros(flipped);
-					return { current + (i + l0s + 1 - sizeof...(String)), current + (i + l0s + 1), true };
-				} else {
-					i += 16;
-					continue;
-				}
-			}
-			*/
-#endif
 		}
 		for (; i < string_left; i++) {
 			uint8_t val = *(current + i);
@@ -983,9 +1178,9 @@ constexpr CTRE_FORCE_INLINE string_search_result<Iterator> search_for_string(Ite
 
 	}
 #if __cpp_char8_t >= 201811
-	else if constexpr (false && sizeof...(String) > 2 && !std::is_same_v<Iterator, utf8_iterator> && is_random_accessible(typename std::iterator_traits<Iterator>::iterator_category{})) {
+	else if constexpr (true && sizeof...(String) > 2 && !std::is_same_v<Iterator, utf8_iterator> && is_random_accessible(typename std::iterator_traits<Iterator>::iterator_category{})) {
 #else
-	else if constexpr (false && sizeof...(String) > 2 && is_random_accessible(typename std::iterator_traits<Iterator>::iterator_category{})) {
+	else if constexpr (true && sizeof...(String) > 2 && is_random_accessible(typename std::iterator_traits<Iterator>::iterator_category{})) {
 #endif
 		constexpr std::array<typename ::std::iterator_traits<Iterator>::value_type, sizeof...(String)> chars{ String... };
 		constexpr std::array<ptrdiff_t, sizeof...(String)> delta_2 = make_delta_2<typename ::std::iterator_traits<Iterator>::value_type>(string<String...>());
