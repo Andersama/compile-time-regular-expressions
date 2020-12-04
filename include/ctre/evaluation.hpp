@@ -116,10 +116,19 @@ template <typename CharT, typename Iterator, typename EndIterator> constexpr CTR
 }
 
 template <auto... String, size_t... Idx, typename Iterator, typename EndIterator> constexpr CTRE_FORCE_INLINE string_match_result<Iterator> evaluate_match_string(Iterator current, [[maybe_unused]] const EndIterator end, std::index_sequence<Idx...>) noexcept {
-
-	bool same = (compare_character(String, current, end) && ... && true);
-
-	return {current, same};
+	using char_type = decltype(*current);
+#if __cpp_char8_t >= 201811
+	if constexpr (!std::is_same_v<Iterator, utf8_iterator> && is_random_accessible(typename std::iterator_traits<Iterator>::iterator_category{})) {
+#else
+	if constexpr (is_random_accessible(typename std::iterator_traits<Iterator>::iterator_category{})) {
+#endif
+		size_t length = std::distance(current, end);
+		bool matched = ((*(current + Idx) == static_cast<char_type>(String)) && ...) && length >= sizeof...(String);
+		return { current += sizeof...(String), matched };
+	} else {
+		bool same = (compare_character(String, current, end) && ... && true);
+		return { current, same };
+	}
 }
 
 template <typename R, typename Iterator, typename EndIterator, auto... String, typename... Tail> 
