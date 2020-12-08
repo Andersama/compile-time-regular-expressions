@@ -4,7 +4,22 @@
 // UTILITY
 // add into set if not exists
 template <template <typename...> typename SetType, typename T, typename... As, bool Exists = (std::is_same_v<T, As> || ... || false)> static constexpr auto push_back_into_set(T, SetType<As...>) -> ctll::conditional<Exists, SetType<As...>, SetType<As...,T>> { return {}; }
+// merge two sets
+template<typename B, typename... Bs, typename... As>
+static constexpr auto push_back_into_set(ctre::set<B, Bs...>, ctre::set<As...>) {
+	if constexpr (sizeof...(Bs) == 0)
+		return push_back_into_set<ctre::set>(B{}, ctre::set<As...>{});
+	else
+		return push_back_into_set(ctre::set<Bs...>{}, push_back_into_set<ctre::set>(B{}, ctre::set<As...>{}));
+}
 
+template<typename B, typename... Bs, typename... As>
+static constexpr auto push_back_into_set(ctre::set<B, Bs...>, ctre::set<ctre::set<As...>>) {
+	if constexpr (sizeof...(Bs) == 0)
+		return push_back_into_set<ctre::set>(B{}, ctre::set<As...>{});
+	else
+		return push_back_into_set(ctre::set<Bs...>{}, push_back_into_set<ctre::set>(B{}, ctre::set<As...>{}));
+}
 //template <template <typename...> typename SetType, typename A, typename BHead, typename... Bs> struct set_merge_helper {
 //	using step = decltype(push_back_into_set<SetType>(BHead(), A()));
 //	using type = ctll::conditional<(sizeof...(Bs) > 0), set_merge_helper<SetType, step, Bs...>, step>;
