@@ -293,14 +293,282 @@ constexpr size_t calculate_size_of_first(...) {
 	return 1;
 }
 
-
-
 template <typename... Content> constexpr size_t calculate_size_of_first(ctll::list<Content...>) {
 	return (calculate_size_of_first(Content{}) + ... + 0);
 }
 
 template <typename... Content> constexpr size_t calculate_size_of_first(ctre::set<Content...>) {
 	return (calculate_size_of_first(Content{}) + ... + 0);
+}
+
+template<typename... Content, typename... Tail> constexpr auto first_and_trailing(ctll::list<sequence<Content...>, Tail...>) noexcept {
+	if constexpr (sizeof...(Content) || sizeof...(Tail))
+		return first_and_trailing(ctll::list<Content..., Tail...>());
+	else
+		return ctll::list_pop_pair<ctll::list<>, ctll::list<>>();
+}
+
+template<typename... Content, typename... Tail> constexpr auto first_and_trailing(ctll::list<ctll::list<Content...>, Tail...>) noexcept {
+	if constexpr (sizeof...(Content) || sizeof...(Tail))
+		return first_and_trailing(ctll::list<Content..., Tail...>());
+	else
+		return ctll::list_pop_pair<ctll::list<>, ctll::list<>>();
+}
+
+//repeats (we can extract sequences if the repeat is non-optional)
+template<size_t A, size_t B, typename... Content, typename... Tail> constexpr auto first_and_trailing(ctll::list<repeat<A,B, Content...>, Tail...>) noexcept {
+	if constexpr (A && B) {
+		if constexpr (B > 1) {
+			return first_and_trailing(ctll::list<Content..., repeat<A - 1, B - 1, Content...>, Tail...>());
+		} else {
+			return first_and_trailing(ctll::list<Content..., Tail...>());
+		}
+	} else if constexpr (A) {
+		return first_and_trailing(ctll::list<Content..., repeat<A-1, B, Content...>, Tail...>());
+	} else { //some form of optional
+		return ctll::list_pop_pair<ctll::list<repeat<A, B, Content...>>, ctll::list<Tail...>>();
+	}
+}
+
+template<size_t A, size_t B, typename... Content, typename... Tail> constexpr auto first_and_trailing(ctll::list<lazy_repeat<A,B, Content...>, Tail...>) noexcept {
+	if constexpr (A && B) {
+		if constexpr (B > 1) {
+			return first_and_trailing(ctll::list<Content..., lazy_repeat<A - 1, B - 1, Content...>, Tail...>());
+		} else {
+			return first_and_trailing(ctll::list<Content..., Tail...>());
+		}
+	} else if constexpr (A) {
+		return first_and_trailing(ctll::list<Content..., lazy_repeat<A-1, B, Content...>, Tail...>());
+	} else { //some form of optional
+		return ctll::list_pop_pair<ctll::list<lazy_repeat<A, B, Content...>>, ctll::list<Tail...>>();
+	}
+}
+
+template<size_t A, size_t B, typename... Content, typename... Tail> constexpr auto first_and_trailing(ctll::list<possessive_repeat<A,B, Content...>, Tail...>) noexcept {
+	if constexpr (A && B) {
+		if constexpr (B > 1) {
+			return first_and_trailing(ctll::list<Content..., possessive_repeat<A - 1, B - 1, Content...>, Tail...>());
+		} else {
+			return first_and_trailing(ctll::list<Content..., Tail...>());
+		}
+	} else if constexpr (A) {
+		return first_and_trailing(ctll::list<Content..., possessive_repeat<A-1, B, Content...>, Tail...>());
+	} else { //some form of optional
+		return ctll::list_pop_pair<ctll::list<possessive_repeat<A, B, Content...>>, ctll::list<Tail...>>();
+	}
+}
+
+template<auto C, auto... String, typename... Tail> constexpr auto first_and_trailing(ctll::list<string<C, String...>, Tail...>) noexcept {
+	if constexpr (sizeof...(String)) {
+		return ctll::list_pop_pair<ctll::list<character<C>>, ctll::list<string<String...>, Tail...>>();
+	} else {
+		return ctll::list_pop_pair<ctll::list<character<C>>, ctll::list<Tail...>>();
+	}
+}
+//special case
+template<auto C, typename... Tail> constexpr auto first_and_trailing(ctll::list<set<character<C>>, Tail...>) noexcept {
+	return ctll::list_pop_pair<ctll::list<character<C>>, ctll::list<Tail...>>();
+}
+
+template<typename T, typename... Types>
+constexpr bool is_any_of_v = std::disjunction_v<std::is_same<T, Types>...>;
+
+template<typename T>
+constexpr bool is_empty_sequence = is_any_of_v<T, sequence<>, ctll::list<>, ctll::_nothing>;
+
+template<typename... Content, typename... Listed>
+constexpr auto CTRE_FORCE_INLINE concatenate_into_sequence(sequence<Content...>, ctll::list<Listed...>) noexcept {
+	return concatenate_into_sequence(sequence<Content..., Listed...>{});
+}
+
+template<typename... Content, typename... Listed>
+constexpr auto CTRE_FORCE_INLINE concatenate_into_sequence(sequence<Content...>, sequence<Listed...>) noexcept {
+	return concatenate_into_sequence(sequence<Content..., Listed...>{});
+}
+
+template<typename... Content, typename... Tail>
+constexpr auto CTRE_FORCE_INLINE concatenate_into_sequence(ctll::list<sequence<Content...>, Tail...>) noexcept {
+	return concatenate_into_sequence(sequence<Content...>{});
+}
+template<typename... Content, typename... Tail>
+constexpr auto CTRE_FORCE_INLINE concatenate_into_sequence(sequence<sequence<Content...>, Tail...>) noexcept {
+	return concatenate_into_sequence(sequence<Content...>{});
+}
+
+template<typename... Content>
+constexpr auto CTRE_FORCE_INLINE concatenate_into_sequence(ctll::list<Content...>) noexcept {
+	return sequence<Content...>{};
+}
+template<typename... Content>
+constexpr auto CTRE_FORCE_INLINE concatenate_into_sequence(sequence<Content...>) noexcept {
+	return sequence<Content...>{};
+}
+
+template<typename... Content>
+constexpr bool is_basic_character(ctll::list<Content...>) noexcept {
+	return false;
+}
+
+template<auto C>
+constexpr bool is_basic_character(ctll::list<character<C>>) noexcept {
+	return true;
+}
+
+template<typename... Content>
+constexpr auto get_basic_character(ctll::list<Content...>) noexcept {
+	return 0;
+}
+
+template<auto C>
+constexpr auto get_basic_character(ctll::list<character<C>>) noexcept {
+	return C;
+}
+
+//recursive helper to extract as many items into a sequence
+template<typename... Lead, typename... Content, typename... Tail> constexpr auto first_and_trailing(ctll::list<sequence<Lead...>, select<Content...>, Tail...>) noexcept {
+	if constexpr (sizeof...(Content) > 1) {
+		using head_element = decltype(ctll::front(ctll::list<Content...>{}));
+		using first_pair = decltype(first_and_trailing(ctll::list<head_element>{}));
+		using first_element = decltype(first_pair().front);
+		using first_trailing = decltype(first_pair().list);
+
+		constexpr bool has_leading_elements = 
+			((!is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(Content{}).front){}))>) && ...);
+		constexpr bool has_same_leading_element =
+			(!is_empty_sequence<decltype(ctll::front(first_element{}))>) &&
+			((std::is_same_v<first_element, decltype(calculate_first_and_trailing(Content{}).front)>) && ...);
+
+		constexpr bool has_trailing_elements = 
+			((!is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(Content{}).list){}))>) && ...);
+		constexpr bool has_same_trailing_elements =
+			((std::is_same_v<first_trailing, decltype(calculate_first_and_trailing(Content{}).list)>) && ...);
+		constexpr bool has_no_trailing_elements =
+			((is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(Content{}).list){}))>) && ...);
+
+		constexpr bool leading_elements_are_characters = 
+			((is_basic_character(decltype(calculate_first_and_trailing(Content{}).front){})) && ...);
+		constexpr bool leading_elements_are_character_like =
+			((MatchesCharacter<
+				decltype(ctll::front(decltype(calculate_first_and_trailing(Content{}).front){}))
+			>::template value<decltype(*std::declval<::std::string_view::iterator>())>) && ...);
+
+		if constexpr (has_same_leading_element && has_same_trailing_elements) {
+			//weird trivial case all select<> branches are the same
+			return first_and_trailing(ctll::list<concatenate_into_sequence(sequence<Lead...>{}, head_element{}), Tail...>{});
+		} else if constexpr (has_same_leading_element && has_trailing_elements) {
+			//first element is the same, we have more select<> to process
+			return first_and_trailing(ctll::list<decltype(concatenate_into_sequence(sequence<Lead...>{}, first_element{})),
+				select<decltype(concatenate_into_sequence(calculate_first_and_trailing(Content{}).list))...>,
+				Tail...
+			>{});
+		} else if constexpr (has_same_leading_element && has_no_trailing_elements) {
+			//first element is the same, no more select<> to process
+			return first_and_trailing(ctll::list<decltype(concatenate_into_sequence(sequence<Lead...>{}, first_element{})),
+				Tail...
+			>{});
+		} else if constexpr ((leading_elements_are_characters || leading_elements_are_character_like) && has_trailing_elements && has_same_trailing_elements) {
+			//first elements are character-like things, trailing are all the same
+			//decltype(concatenate_into_sequence(decltype(concatenate_into_sequence(first_trailing{})), sequence<Tail...>))
+			return first_and_trailing(
+				ctll::list<sequence<Lead...>, set<
+					decltype(ctll::front(decltype(calculate_first_and_trailing(Content{}).front){}))...
+				>,
+				decltype(concatenate_into_sequence(first_trailing{})),
+				Tail...>{}
+			);
+		} else if constexpr ((leading_elements_are_characters || leading_elements_are_character_like) && has_no_trailing_elements) {
+			//first elements are character-like things, no more select<> to process
+			return first_and_trailing(ctll::list<sequence<Lead..., set<Content...>>, Tail...>{});
+		} else {
+			//could not transform select into anything else
+			return first_and_trailing(ctll::list<Lead..., select<Content...>, Tail...>{});
+		}
+	} else {
+		if constexpr (sizeof...(Content) == 1) { //trivial cases
+			return first_and_trailing(ctll::list<Lead..., Content..., Tail...>{});
+		} else { //no branches left -> reject
+			return ctll::list_pop_pair<ctll::list<reject>, ctll::list<>>();
+		}
+	}
+}
+//base case select
+template<typename... Content, typename... Tail> constexpr auto first_and_trailing(ctll::list<select<Content...>, Tail...>) noexcept {
+	if constexpr (sizeof...(Content) > 1) {
+		using head_element = decltype(ctll::front(ctll::list<Content...>{}));
+		using first_pair = decltype(first_and_trailing(ctll::list<head_element>{}));
+		using first_element = decltype(first_pair().front);
+		using first_trailing = decltype(first_pair().list);
+
+		constexpr bool has_leading_elements = 
+			((!is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(Content{}).front){}))>) && ...);
+		constexpr bool has_same_leading_element =
+			((std::is_same_v<first_element, decltype(calculate_first_and_trailing(Content{}).front)>) && ...);
+
+		constexpr bool has_trailing_elements = 
+			((!is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(Content{}).list){}))>) && ...);
+		constexpr bool has_same_trailing_elements =
+			((std::is_same_v<first_trailing, decltype(calculate_first_and_trailing(Content{}).list)>) && ...);
+		constexpr bool has_no_trailing_elements =
+			((is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(Content{}).list){}))>) && ...);
+
+		constexpr bool leading_elements_are_characters = 
+			((is_basic_character(decltype(calculate_first_and_trailing(Content{}).front){})) && ...);
+		constexpr bool leading_elements_are_character_like =
+			((MatchesCharacter<
+				decltype(ctll::front(decltype(calculate_first_and_trailing(Content{}).front){}))
+			>::template value<decltype(*std::declval<::std::string_view::iterator>())>) && ...);
+
+		if constexpr (has_leading_elements && has_same_leading_element && has_same_trailing_elements) {
+			//weird trivial case all select<> branches are the same
+			return first_and_trailing(ctll::list<head_element, Tail...>{});
+		} else if constexpr (has_leading_elements && has_same_leading_element && has_trailing_elements) {
+			//first element is the same, we have more select<> to process
+			return first_and_trailing(ctll::list<decltype(concatenate_into_sequence(first_element{})),
+				select<decltype(concatenate_into_sequence(calculate_first_and_trailing(Content{}).list))...>,
+				Tail...
+			>{});
+		} else if constexpr (has_leading_elements && has_same_leading_element && has_no_trailing_elements) {
+			//first element is the same, no more select<> to process
+			return first_and_trailing(ctll::list<decltype(concatenate_into_sequence(first_element{})),
+				Tail...
+			>{});
+		} else if constexpr ((leading_elements_are_characters || leading_elements_are_character_like) && has_trailing_elements && has_same_trailing_elements) {
+			//first elements are character-like things, trailing are all the same
+			//decltype(concatenate_into_sequence(decltype(concatenate_into_sequence(first_trailing{})), sequence<Tail...>))
+			return first_and_trailing(
+				ctll::list<set<
+					decltype(ctll::front(decltype(calculate_first_and_trailing(Content{}).front){}))...
+				>,
+				decltype(concatenate_into_sequence(first_trailing{})),
+				Tail...>{}
+			);
+		} else if constexpr ((leading_elements_are_characters || leading_elements_are_character_like) && has_no_trailing_elements) {
+			//first elements are character-like things, no more select<> to process
+			return first_and_trailing(ctll::list<set<Content...>, Tail...>{});
+		} else {
+			//could not transform select into anything else, return the select element
+			return ctll::list_pop_pair<ctll::list<select<Content...>>, ctll::list<Tail...>>();
+		}
+	} else {
+		if constexpr (sizeof...(Content) == 1) { //trivial cases
+			return first_and_trailing(ctll::list<sequence<Content...>, Tail...>{});
+		} else { //no branches left -> reject
+			return ctll::list_pop_pair<ctll::list<reject>, ctll::list<>>();
+		}
+	}
+}
+
+//general case
+template<typename T, typename... Tail> constexpr auto first_and_trailing(ctll::list<T, Tail...>) noexcept {
+	return ctll::list_pop_pair<ctll::list<T>, ctll::list<Tail...>>();
+}
+
+// user facing interface
+template<typename... Content> constexpr auto calculate_first_and_trailing(Content...) noexcept {
+	if constexpr (sizeof...(Content) > 0ULL)
+		return first_and_trailing(ctll::list<Content...>());
+	else
+		return ctll::list_pop_pair<ctll::list<>, ctll::list<>>();
 }
 
 template <auto A, typename CB> constexpr int64_t negative_helper(ctre::character<A>, CB & cb, int64_t start) {

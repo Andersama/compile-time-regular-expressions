@@ -133,17 +133,228 @@ constexpr CTRE_FORCE_INLINE R evaluate(const Iterator begin, Iterator current, c
 	return evaluate(begin, result.position, end, consumed_something(f, sizeof...(String) > 0), captures, ctll::list<Tail...>());
 }
 
-// matching select in patterns
-template <typename R, typename Iterator, typename EndIterator, typename HeadOptions, typename... TailOptions, typename... Tail> 
-constexpr CTRE_FORCE_INLINE R evaluate(const Iterator begin, Iterator current, const EndIterator end, const flags & f, R captures, ctll::list<select<HeadOptions, TailOptions...>, Tail...>) noexcept {
+template <typename R, typename Iterator, typename EndIterator, size_t N, typename... Content, size_t... Idxs>
+constexpr CTRE_FORCE_INLINE R evaluate_parallel(const Iterator begin, Iterator current, const EndIterator end, const flags& f, R captures, std::array<bool, N> match_mask, ctll::list<Content...>, std::index_sequence<Idxs...>) noexcept {
+	static_assert(((Idxs < N) && ...) && "all indexs must be within bounds");
+	bool some_previous_path_matched = ((match_mask[Idxs]) || ...);
+	//fallback to serial when we can't step in parallel
+	if (some_previous_path_matched) {
+		return evaluate(begin, current, end, f, captures, ctll::list<Content...>{});
+	} else {
+		return not_matched;
+	}
+}
+
+template <typename R, typename Iterator, typename EndIterator, size_t N, size_t Idx, typename HeadOptions, typename... TailOptions, typename... Tail, size_t... Idxs>
+constexpr CTRE_FORCE_INLINE R evaluate_parallel(const Iterator begin, Iterator current, const EndIterator end, const flags& f, R captures, std::array<bool, N> match_mask, ctll::list<select<HeadOptions, TailOptions...>, Tail...>, std::index_sequence<Idx, Idxs...>) noexcept {
+	static_assert(((Idxs < N) && ...) && "all indexs must be within bounds");
+	using first_pair = decltype(calculate_first_and_trailing(HeadOptions{}));
+	using first_element = decltype(first_pair().front);
+	using first_trailing = decltype(first_pair().list);
+	using char_type = ::std::remove_cvref_t<decltype(*current)>;
+
+	if constexpr (sizeof...(TailOptions)) {
+		constexpr bool has_leading_elements =
+			(!is_empty_sequence<decltype(ctll::front(first_element{}))>) &&
+			((!is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(TailOptions{}).front){}))>) && ...);
+		constexpr bool has_same_leading_element =
+			((std::is_same_v<first_element, decltype(calculate_first_and_trailing(TailOptions{}).front)>) && ...);
+
+		constexpr bool has_trailing_elements =
+			(!is_empty_sequence<decltype(ctll::front(first_trailing{}))>) &&
+			((!is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(TailOptions{}).list){}))>) && ...);
+		constexpr bool has_same_trailing_elements =
+			((std::is_same_v<first_trailing, decltype(calculate_first_and_trailing(TailOptions{}).list)>) && ...);
+		constexpr bool has_no_trailing_elements =
+			(is_empty_sequence<decltype(ctll::front(first_trailing{}))>) &&
+			((is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(TailOptions{}).list){}))>) && ...);
+
+		constexpr bool leading_elements_are_characters = 
+			(is_basic_character(first_element{})) &&
+			((is_basic_character(decltype(calculate_first_and_trailing(TailOptions{}).front){})) && ...);
+		constexpr bool leading_elements_are_character_like =
+			(MatchesCharacter<decltype(ctll::front(first_element{}))>::template value<decltype(*std::declval<::std::string_view::iterator>())>) &&
+			((MatchesCharacter<
+				decltype(ctll::front(decltype(calculate_first_and_trailing(TailOptions{}).front){}))
+			>::template value<decltype(*std::declval<::std::string_view::iterator>())>) && ...);
+
+		if constexpr (has_leading_elements && has_same_leading_element && has_same_trailing_elements) {
+			//trivial case all select<> branches are the same
+			return evaluate_parallel(begin, current, end, f, captures, match_mask, ctll::list<HeadOptions, Tail...>{}, std::index_sequence<Idx, Idxs...>{});
+		} else if constexpr (has_leading_elements && has_same_leading_element && has_trailing_elements) {
+			//first element is the same, we have more select<> to process
+			return evaluate_parallel(begin, current, end, f, captures, match_mask,
+			ctll::list<decltype(concatenate_into_sequence(first_element{})),
+				select<
+					decltype(concatenate_into_sequence(first_trailing{})),
+					decltype(concatenate_into_sequence(calculate_first_and_trailing(TailOptions{}).list))...
+				>,
+				Tail...
+			>{}, std::index_sequence<Idx, Idxs...>{});
+		} else if constexpr (has_leading_elements && has_same_leading_element && has_no_trailing_elements) {
+			return evaluate_parallel(begin, current, end, f, captures, match_mask, ctll::list<
+				decltype(concatenate_into_sequence(first_element{})),
+				Tail...
+			>{}, std::index_sequence<Idx, Idxs...>{});
+		} else if constexpr ((leading_elements_are_characters || leading_elements_are_character_like) && has_trailing_elements && has_same_trailing_elements) {
+			return evaluate_parallel(begin, current, end, f, captures, match_mask, ctll::list<
+				set<
+					decltype(ctll::front(first_element{})),
+					decltype(ctll::front(calculate_first_and_trailing(TailOptions{}).front))...
+					//decltype(concatenate_into_sequence(calculate_first_and_trailing(TailOptions{}).list))...
+				>,
+				decltype(concatenate_into_sequence(first_trailing{})),
+				Tail...
+			>{}, std::index_sequence<Idx, Idxs...>{});
+		} else if constexpr ((leading_elements_are_characters || leading_elements_are_character_like) && has_no_trailing_elements) {
+			return evaluate_parallel(begin, current, end, f, captures, match_mask, ctll::list<
+				set<
+					decltype(ctll::front(first_element{})),
+					decltype(ctll::front(calculate_first_and_trailing(TailOptions{}).front))...
+				>,
+				Tail...>{}, std::index_sequence<Idx, Idxs...>{});
+		} else if constexpr (leading_elements_are_characters && has_trailing_elements) {
+			//match each select branch's leading character (opportunity for sse instructions here)
+			match_mask[Idx] = match_mask[Idx] && (current != end) && (*current == static_cast<char_type>(get_basic_character(first_element{})));
+			((match_mask[Idxs] = match_mask[Idxs] && (current != end) && (*current == static_cast<char_type>(get_basic_character(calculate_first_and_trailing(TailOptions{}).front)))), ...);
+			if (current != end)
+				current++;
+			return evaluate_parallel(begin, current, end, f, captures, match_mask, 
+				ctll::list<select<
+						decltype(concatenate_into_sequence(first_trailing{})),
+						decltype(concatenate_into_sequence(calculate_first_and_trailing(TailOptions{}).list))...
+					>, Tail...>{}, std::index_sequence<Idx, Idxs...>{});
+		} else if constexpr (leading_elements_are_character_like && has_trailing_elements) {
+			//match each select branch's leading character (opportunity for sse instructions here)
+			match_mask[Idx] = match_mask[Idx] && (current != end) && (decltype(ctll::front(first_element{}))::match_char(*current));
+			((match_mask[Idxs] = match_mask[Idxs] && (current != end) && (
+					decltype(ctll::front(calculate_first_and_trailing(TailOptions{}).front))::match_char(*current)
+				)), ...);
+			if (current != end)
+				current++;
+			return evaluate_parallel(begin, current, end, f, captures, match_mask,
+				ctll::list<select<
+					decltype(concatenate_into_sequence(first_trailing{})),
+					decltype(concatenate_into_sequence(calculate_first_and_trailing(TailOptions{}).list))...
+				>, Tail...>{},
+				std::index_sequence<Idx, Idxs...>{}
+			);
+		}
+	}
+
+	//if possible treat select as character class
+	if constexpr (MatchesCharacter<HeadOptions>::template value<decltype(*std::declval<Iterator>())> &&
+		((MatchesCharacter<TailOptions>::template value<decltype(*std::declval<Iterator>())>) && ...)) {
+		return evaluate_parallel(begin, current, end, f, captures, match_mask, ctll::list<set<HeadOptions, TailOptions...>, Tail...>(), std::index_sequence<Idx, Idxs...>{});
+	} else { //otherwise
+		bool some_previous_path_matched = (match_mask[Idx] || ((match_mask[Idxs]) || ...));
+		if (some_previous_path_matched) {
+			if (auto r = evaluate(begin, current, end, f, captures, ctll::list<HeadOptions, Tail...>{})) {
+				return r;
+			} else {
+				return evaluate(begin, current, end, f, captures, ctll::list<select<TailOptions...>, Tail...>{});
+			}
+		} else {
+			return not_matched;
+		}
+	}
+}
+
+template<typename T, size_t N>
+constexpr auto make_array(T value) -> std::array<T, N>
+{
+	std::array<T, N> a{};
+	for (auto& x : a)
+		x = value;
+	return a;
+}
+
+template <typename R, typename Iterator, typename EndIterator, typename HeadOptions, typename... TailOptions, typename... Tail>
+constexpr CTRE_FORCE_INLINE R evaluate(const Iterator begin, Iterator current, const EndIterator end, const flags& f, R captures, ctll::list<select<HeadOptions, TailOptions...>, Tail...>) noexcept {
+	using first_pair = decltype(calculate_first_and_trailing(HeadOptions{}));
+	using first_element = decltype(first_pair().front);
+	using first_trailing = decltype(first_pair().list);
+	using char_type = ::std::remove_cvref_t<decltype(*current)>;
+
+	if constexpr (sizeof...(TailOptions)) {
+		constexpr bool has_leading_elements =
+			(!is_empty_sequence<decltype(ctll::front(first_element{}))>) &&
+			((!is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(TailOptions{}).front){}))>) && ...);
+		constexpr bool has_same_leading_element =
+			((std::is_same_v<first_element, decltype(calculate_first_and_trailing(TailOptions{}).front)>) && ...);
+
+		constexpr bool has_trailing_elements =
+			(!is_empty_sequence<decltype(ctll::front(first_trailing{}))>) &&
+			((!is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(TailOptions{}).list){}))>) && ...);
+		constexpr bool has_same_trailing_elements =
+			((std::is_same_v<first_trailing, decltype(calculate_first_and_trailing(TailOptions{}).list)>) && ...);
+		constexpr bool has_no_trailing_elements =
+			(is_empty_sequence<decltype(ctll::front(first_trailing{}))>) &&
+			((is_empty_sequence<decltype(ctll::front(decltype(calculate_first_and_trailing(TailOptions{}).list){}))>) && ...);
+
+		constexpr bool leading_elements_are_characters = 
+			(is_basic_character(first_element{})) &&
+			((is_basic_character(decltype(calculate_first_and_trailing(TailOptions{}).front){})) && ...);
+		constexpr bool leading_elements_are_character_like =
+			(MatchesCharacter<decltype(ctll::front(first_element{}))>::template value<decltype(*std::declval<::std::string_view::iterator>())>) &&
+			((MatchesCharacter<
+				decltype(ctll::front(decltype(calculate_first_and_trailing(TailOptions{}).front){}))
+			>::template value<decltype(*std::declval<::std::string_view::iterator>())>) && ...);
+
+		if constexpr (has_leading_elements && has_same_leading_element && has_same_trailing_elements) {
+			//trivial case all select<> branches are the same
+			return evaluate(begin, current, end, f, captures, ctll::list<HeadOptions, Tail...>{});
+		} else if constexpr (has_leading_elements && has_same_leading_element && has_trailing_elements) {
+			//first element is the same, we have more select<> to process
+			return evaluate(begin, current, end, f, captures,
+			ctll::list<decltype(concatenate_into_sequence(first_element{})),
+				select<
+					decltype(concatenate_into_sequence(first_trailing{})),
+					decltype(concatenate_into_sequence(calculate_first_and_trailing(TailOptions{}).list))...
+				>,
+				Tail...
+			>{});
+		} else if constexpr (has_leading_elements && has_same_leading_element && has_no_trailing_elements) {
+			return evaluate(begin, current, end, f, captures, ctll::list<
+				decltype(concatenate_into_sequence(first_element{})),
+				Tail...
+			>{});
+		} else if constexpr ((leading_elements_are_characters || leading_elements_are_character_like) && has_trailing_elements && has_same_trailing_elements) {
+			return evaluate(begin, current, end, f, captures, ctll::list<
+				set<
+					decltype(ctll::front(first_element{})),
+					decltype(ctll::front(calculate_first_and_trailing(TailOptions{}).front))...
+					//decltype(concatenate_into_sequence(calculate_first_and_trailing(TailOptions{}).list))...
+				>,
+				decltype(concatenate_into_sequence(first_trailing{})),
+				Tail...
+			>{});
+		} else if constexpr ((leading_elements_are_characters || leading_elements_are_character_like) && has_no_trailing_elements) {
+			return evaluate(begin, current, end, f, captures, ctll::list<
+				set<
+					decltype(ctll::front(first_element{})),
+					decltype(ctll::front(calculate_first_and_trailing(TailOptions{}).front))...
+				>,
+				Tail...
+			>{});
+		} else if constexpr (leading_elements_are_characters && has_trailing_elements) {
+			alignas(32) constexpr std::array<bool, sizeof...(TailOptions) + 1> match_mask = make_array<bool, sizeof...(TailOptions) + 1>(true);
+			return evaluate_parallel(begin, current, end, f, captures, match_mask, ctll::list<select<HeadOptions, TailOptions...>, Tail...>{}, std::make_index_sequence<sizeof...(TailOptions) + 1>{});
+		} else if constexpr (leading_elements_are_character_like && has_trailing_elements) {
+			alignas(32) constexpr std::array<bool, sizeof...(TailOptions) + 1> match_mask = make_array<bool, sizeof...(TailOptions) + 1>(true);
+			return evaluate_parallel(begin, current, end, f, captures, match_mask, ctll::list<select<HeadOptions, TailOptions...>, Tail...>{}, std::make_index_sequence<sizeof...(TailOptions) + 1>{});
+		}
+	}
+
+	//if possible treat select as character class
 	if constexpr (MatchesCharacter<HeadOptions>::template value<decltype(*std::declval<Iterator>())> &&
 		((MatchesCharacter<TailOptions>::template value<decltype(*std::declval<Iterator>())>) && ...)) {
 		return evaluate(begin, current, end, f, captures, ctll::list<set<HeadOptions, TailOptions...>, Tail...>());
-	} else {
-		if (auto r = evaluate(begin, current, end, f, captures, ctll::list<HeadOptions, Tail...>())) {
+	} else { //otherwise
+		if (auto r = evaluate(begin, current, end, f, captures, ctll::list<HeadOptions, Tail...>{})) {
 			return r;
 		} else {
-			return evaluate(begin, current, end, f, captures, ctll::list<select<TailOptions...>, Tail...>());
+			return evaluate(begin, current, end, f, captures, ctll::list<select<TailOptions...>, Tail...>{});
 		}
 	}
 }
