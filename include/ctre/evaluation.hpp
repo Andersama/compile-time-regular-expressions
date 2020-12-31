@@ -109,7 +109,7 @@ template <typename Iterator> struct string_match_result {
 
 template <typename CharT, typename Iterator, typename EndIterator> constexpr CTRE_FORCE_INLINE bool compare_character(CharT c, Iterator & it, const EndIterator & end) {
 	if (it != end) {
-		using char_type = decltype(*it);
+		using char_type = ::std::remove_reference_t<::std::remove_cv_t<decltype(*it)>>;
 		return *it++ == static_cast<char_type>(c);
 	}
 	return false;
