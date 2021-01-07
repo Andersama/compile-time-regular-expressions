@@ -5,10 +5,12 @@
 #include "atoms.hpp"
 #include "atoms_unicode.hpp"
 #include "starts_with_anchor.hpp"
+#include "ends_with_anchor.hpp"
 #include "utility.hpp"
 #include "return_type.hpp"
 #include "find_captures.hpp"
 #include "first.hpp"
+#include "pattern_length.hpp"
 #include <iterator>
 
 // remove me when MSVC fix the constexpr bug

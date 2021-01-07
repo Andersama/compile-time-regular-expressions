@@ -50,7 +50,15 @@ public:
 struct match_method {
 	template <typename Modifier = singleline, typename ResultIterator = void, typename RE, typename IteratorBegin, typename IteratorEnd> constexpr CTRE_FORCE_INLINE static auto exec(IteratorBegin orig_begin, IteratorBegin begin, IteratorEnd end, RE) noexcept {
 		using result_iterator = std::conditional_t<std::is_same_v<ResultIterator, void>, IteratorBegin, ResultIterator>;
-		
+
+		if constexpr (is_random_accessible(typename std::iterator_traits<IteratorBegin>::iterator_category{}) && ::std::is_same_v<IteratorBegin, ::std::remove_const_t<IteratorEnd>>) {
+			constexpr auto length = pattern_length<IteratorBegin>(RE{});
+			if ((length.high > size) || (size < length.low)) {
+				//impossible to match
+				return evaluate(orig_begin, begin, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, end_mark, reject>());
+			}
+		}
+
 		return evaluate(orig_begin, begin, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, RE, assert_subject_end, end_mark, accept>());
 	}
 	
@@ -64,17 +72,59 @@ struct search_method {
 		using result_iterator = std::conditional_t<std::is_same_v<ResultIterator, void>, IteratorBegin, ResultIterator>;
 		
 		constexpr bool fixed = starts_with_anchor(Modifier{}, ctll::list<RE>{});
-	
-		auto it = begin;
-	
-		for (; end != it && !fixed; ++it) {
-			if (auto out = evaluate(orig_begin, it, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, RE, end_mark, accept>())) {
-				return out;
+
+		constexpr bool fixed = starts_with_anchor(Modifier{}, ctll::list<RE>{});
+
+		if constexpr (is_random_accessible(typename std::iterator_traits<IteratorBegin>::iterator_category{}) && ::std::is_same_v<IteratorBegin, ::std::remove_const_t<IteratorEnd>>) {
+			constexpr bool fixed_end = ends_with_anchor(Modifier{}, ctll::list<RE>{});
+			constexpr auto length = pattern_length<IteratorBegin>(RE{});
+			if constexpr (fixed_end && (length.high < pattern_infinite_size())) {
+				size_t size = std::distance(begin, end);
+				if ((length.high > size) || (size < length.low)) {
+					//impossible to match
+					return evaluate(orig_begin, begin, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, end_mark, reject>());
+				}
+				// end of string / line anchor optimization
+				auto it = begin + (size - length.high);
+
+				for (; end != it && !fixed; ++it) {
+					if (auto out = evaluate(orig_begin, it, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, RE, end_mark, accept>())) {
+						return out;
+					}
+				}
+
+				// in case the RE is empty or fixed
+				return evaluate(orig_begin, it, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, RE, end_mark, accept>());
+			} else {
+				size_t size = std::distance(begin, end);
+				if ((length.high > size) || (size < length.low)) {
+					//impossible to match
+					return evaluate(orig_begin, begin, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, end_mark, reject>());
+				}
+
+				auto it = begin;
+
+				for (; end != it && !fixed; ++it) {
+					if (auto out = evaluate(orig_begin, it, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, RE, end_mark, accept>())) {
+						return out;
+					}
+				}
+
+				// in case the RE is empty or fixed
+				return evaluate(orig_begin, it, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, RE, end_mark, accept>());
 			}
+		} else {
+			auto it = begin;
+
+			for (; end != it && !fixed; ++it) {
+				if (auto out = evaluate(orig_begin, it, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, RE, end_mark, accept>())) {
+					return out;
+				}
+			}
+
+			// in case the RE is empty or fixed
+			return evaluate(orig_begin, it, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, RE, end_mark, accept>());
 		}
-	
-		// in case the RE is empty or fixed
-		return evaluate(orig_begin, it, end, Modifier{}, return_type<result_iterator, RE>{}, ctll::list<start_mark, RE, end_mark, accept>());
 	}
 	
 	template <typename Modifier = singleline, typename ResultIterator = void, typename RE, typename IteratorBegin, typename IteratorEnd> constexpr CTRE_FORCE_INLINE static auto exec(IteratorBegin begin, IteratorEnd end, RE) noexcept {
